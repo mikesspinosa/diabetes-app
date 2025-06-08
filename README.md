@@ -1,63 +1,12 @@
-# Aplicación para Diabetes
+# React + Vite
 
-Una aplicación web para gestionar y dar seguimiento a información relacionada con la diabetes.
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## Descripción
-Esta aplicación está diseñada para ayudar a los usuarios a monitorear y gestionar sus datos de salud relacionados con la diabetes.
+Currently, two official plugins are available:
 
-## Comenzando
-### Prerrequisitos
-- Node.js (versión 14 o superior)
-- npm o yarn
-- Git
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
-### Instalación
-1. Clona el repositorio
-   ```bash
-   git clone https://github.com/mikesspinosa/diabetes-app.git
-   ```
-2. Navega al directorio del proyecto
-   ```bash
-   cd diabetes-app
-   ```
-3. Instala las dependencias
-   ```bash
-   npm install
-   ```
-4. Inicia la aplicación en modo desarrollo
-   ```bash
-   npm run dev
-   ```
+## Expanding the ESLint configuration
 
-## Características
-- Registro de niveles de glucosa
-- Seguimiento de medicamentos
-- Registro de actividad física
-- Planificación de comidas
-- Recordatorios personalizables
-
-## Tecnologías Utilizadas
-- React.js
-- Node.js
-- Express
-- MongoDB
-- TypeScript
-
-## Estructura del Proyecto
-```
-diabetes-app/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   ├── services/
-│   └── utils/
-├── public/
-├── tests/
-└── docs/
-```
-
-## Contribuciones
-Siéntete libre de enviar problemas y solicitudes de cambios. Para cambios importantes, por favor abre primero un issue para discutir lo que te gustaría cambiar.
-
-## Licencia
-Este proyecto está licenciado bajo la Licencia MIT. 
+If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
