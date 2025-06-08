@@ -16,16 +16,48 @@ Esta aplicación está diseñada para ayudar a los usuarios a monitorear y gesti
    ```bash
    git clone https://github.com/mikesspinosa/diabetes-app.git
    ```
-2. Instala las dependencias
+2. Navega al directorio del proyecto
+   ```bash
+   cd diabetes-app
+   ```
+3. Instala las dependencias
    ```bash
    npm install
    ```
+4. Inicia la aplicación en modo desarrollo
+   ```bash
+   npm run dev
+   ```
 
 ## Características
-- Próximamente...
+- Registro de niveles de glucosa
+- Seguimiento de medicamentos
+- Registro de actividad física
+- Planificación de comidas
+- Recordatorios personalizables
+
+## Tecnologías Utilizadas
+- React.js
+- Node.js
+- Express
+- MongoDB
+- TypeScript
+
+## Estructura del Proyecto
+```
+diabetes-app/
+├── src/
+│   ├── components/
+│   ├── pages/
+│   ├── services/
+│   └── utils/
+├── public/
+├── tests/
+└── docs/
+```
 
 ## Contribuciones
-Siéntete libre de enviar problemas y solicitudes de cambios.
+Siéntete libre de enviar problemas y solicitudes de cambios. Para cambios importantes, por favor abre primero un issue para discutir lo que te gustaría cambiar.
 
 ## Licencia
 Este proyecto está licenciado bajo la Licencia MIT. 
