@@ -1,6 +1,6 @@
 # Aplicación para Diabetes
 
-Una aplicación web para gestionar y dar seguimiento a información relacionada con la diabetes.
+Una aplicación web para gestionar y dar seguimiento a información relacionada con la diabetes. Para uso personal.
 
 ## Descripción
 Esta aplicación está diseñada para ayudar a los usuarios a monitorear y gestionar sus datos de salud relacionados con la diabetes.
@@ -55,9 +55,6 @@ diabetes-app/
 ├── tests/
 └── docs/
 ```
-
-## Contribuciones
-Siéntete libre de enviar problemas y solicitudes de cambios. Para cambios importantes, por favor abre primero un issue para discutir lo que te gustaría cambiar.
 
 ## Licencia
 Este proyecto está licenciado bajo la Licencia MIT. 
