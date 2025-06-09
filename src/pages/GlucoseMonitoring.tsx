@@ -72,7 +72,7 @@ import {
   Cell,
   Legend,
 } from 'recharts';
-import { format, subHours, isWithinInterval } from 'date-fns';
+import { format, subHours, isWithinInterval, subDays, subYears, isAfter } from 'date-fns';
 import type { Theme as MuiTheme } from '@mui/material/styles';
 import TildeIcon from '../components/icons/TildeIcon';
 
@@ -116,16 +116,12 @@ interface TrendAnalysis {
 
 // Configuración de rangos de tiempo
 const timeRanges = [
-  { value: '1w', label: '1 Semana', hours: 168 },
-  { value: '2w', label: '2 Semanas', hours: 336 },
-  { value: '1m', label: '1 Mes', hours: 720 },
-  { value: '3m', label: '3 Meses', hours: 2160 },
-  { value: '6m', label: '6 Meses', hours: 4320 },
-  { value: '1y', label: '1 Año', hours: 8760 },
-  { value: '2y', label: '2 Años', hours: 17520 },
-  { value: '5y', label: '5 Años', hours: 43800 },
-  { value: '10y', label: '10 Años', hours: 87600 },
-];
+  { value: '2h', label: '2 horas', hours: 2, interval: 10 }, // Cada 10 minutos
+  { value: '12h', label: '12 horas', hours: 12, interval: 30 }, // Cada 30 minutos
+  { value: '24h', label: '24 horas', hours: 24, interval: 60 }, // Cada hora
+  { value: '7d', label: '7 días', hours: 168, interval: 240 }, // Cada 4 horas
+  { value: '14d', label: '14 días', hours: 336, interval: 720 }, // Cada 12 horas
+] as const;
 
 const insulinTimeRanges = [
   { value: '24h', label: '24 horas', hours: 24 },
@@ -684,22 +680,9 @@ const GlucoseMonitoring: React.FC = () => {
     // Estimated A1c
     const eA1c = mean > 0 ? parseFloat(((avgValue + 46.7) / 28.7).toFixed(1)) : 0;
 
-    // Total Insulin with time range filter
-    const currentTimeRange = timeRanges.find(r => r.value === timeRange) || timeRanges[0];
-    const startTime = new Date();
-    startTime.setHours(startTime.getHours() - currentTimeRange.hours);
-
-    const filteredInsulinLog = insulinLog.filter(entry => 
-      new Date(entry.time) >= startTime
-    );
-
-    const totalInsulinRapid = filteredInsulinLog
-      .filter(e => e.type === 'rapid')
-      .reduce((acc, entry) => acc + entry.units, 0);
-    
-    const totalInsulinLong = filteredInsulinLog
-      .filter(e => e.type === 'long')
-      .reduce((acc, entry) => acc + entry.units, 0);
+    // Total Insulin
+    const totalInsulinRapid = insulinLog.filter(e => e.type === 'rapid').reduce((acc, entry) => acc + entry.units, 0);
+    const totalInsulinLong = insulinLog.filter(e => e.type === 'long').reduce((acc, entry) => acc + entry.units, 0);
 
     return {
       average: avgValue,
@@ -716,7 +699,7 @@ const GlucoseMonitoring: React.FC = () => {
         long: totalInsulinLong
       }
     };
-  }, [analyzedData, insulinLog, timeRange]);
+  }, [analyzedData, insulinLog]);
 
   const allStatsConfig = {
     average: { type: 'average', label: 'Promedio', unit: 'mg/dL', icon: <BarChartIcon /> },
@@ -1275,28 +1258,23 @@ const GlucoseMonitoring: React.FC = () => {
                         pt: `calc(50% - ${itemHeight / 2}px)`, // Padding to center first item
                         pb: `calc(50% - ${itemHeight / 2}px)`, // Padding to center last item
                       }}>
-                        {Array.from({ length: 41 }, (_, i) => i).map((value) => (
+                        {[...Array(101).keys()].map((value) => (
                           <Box
                             key={value}
-                            onClick={() => {
-                               if (rouletteRef.current) {
-                                rouletteRef.current.scrollTo({ top: value * itemHeight, behavior: 'smooth' });
-                              }
-                            }}
+                            id={`unit-${value}`}
                             sx={{
-                              minWidth: '80px',
-                              height: itemHeight - 8,
+                              height: itemHeight,
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              fontSize: { xs: '1.5rem', md: '1.8rem' },
+                              fontSize: insulinUnits === value ? '2rem' : '1.5rem',
                               fontWeight: insulinUnits === value ? 700 : 400,
                               color: insulinUnits === value ? activeInsulinColor : 'text.secondary',
-                              scrollSnapAlign: 'center',
-                              transition: 'color 0.3s ease, font-weight 0.3s ease, transform 0.3s ease',
+                              transition: 'font-size 0.3s, font-weight 0.3s, transform 0.3s',
                               transform: insulinUnits === value ? 'scale(1.15)' : 'scale(1)',
                               cursor: 'pointer',
                             }}
+                            onClick={() => setInsulinUnits(value)}
                           >
                             {value}
                           </Box>
@@ -1598,12 +1576,13 @@ const GlucoseMonitoring: React.FC = () => {
                       <ResetIcon fontSize="small" />
                     </Button>
                   </ButtonGroup>
-                  <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <FormControl sx={{ minWidth: 120 }}>
                     <InputLabel>Rango de Tiempo</InputLabel>
                     <Select
                       value={timeRange}
-                      label="Rango de Tiempo"
                       onChange={handleTimeRangeChange}
+                      label="Rango de Tiempo"
+                      sx={{ width: '100%' }}
                     >
                       {timeRanges.map((range) => (
                         <MenuItem key={range.value} value={range.value}>
@@ -1622,9 +1601,9 @@ const GlucoseMonitoring: React.FC = () => {
                     data={analyzedData}
                     margin={{
                       top: 20,
-                      right: isMobile ? 10 : 30,
-                      left: isMobile ? 0 : 10,
-                      bottom: timeConfig.angleLabels ? (isMobile ? 40 : 50) : (isMobile ? 20 : 30),
+                      right: 30,
+                      left: 10,
+                      bottom: timeConfig.angleLabels ? 50 : 30,
                     }}
                   >
                     <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
@@ -1659,53 +1638,88 @@ const GlucoseMonitoring: React.FC = () => {
                       ifOverflow="visible"
                     />
                     <ReferenceArea
-                      y1={0}
+                      y1={40}
                       y2={70}
                       fill="url(#colorLow)"
                       fillOpacity={1}
                       strokeOpacity={0}
                       ifOverflow="visible"
                     />
-                    <XAxis
+                    <ReferenceLine 
+                      y={180} 
+                      stroke={theme.palette.error.main} 
+                      strokeDasharray="3 3"
+                      label={{ 
+                        value: "Alto", 
+                        position: "right",
+                        fontSize: isMobile ? 10 : 12,
+                        fill: theme.palette.error.main
+                      }}
+                      className="opacity-50"
+                    />
+                    <ReferenceLine 
+                      y={70} 
+                      stroke={theme.palette.warning.main} 
+                      strokeDasharray="3 3"
+                      label={{ 
+                        value: "Bajo", 
+                        position: "right",
+                        fontSize: isMobile ? 10 : 12,
+                        fill: theme.palette.warning.main
+                      }}
+                      className="opacity-50"
+                    />
+                    <XAxis 
                       dataKey="time"
-                      tickFormatter={formatXAxisTick}
+                      tick={{ 
+                        fontSize: isMobile ? 10 : 12,
+                        fill: theme.palette.text.primary,
+                      }}
+                      interval={zoomDomain ? "preserveStartEnd" : Math.ceil(analyzedData.length / timeConfig.tickCount - 1)}
                       angle={timeConfig.angleLabels ? -45 : 0}
                       textAnchor={timeConfig.angleLabels ? "end" : "middle"}
                       height={timeConfig.angleLabels ? 60 : 30}
-                      tick={{ fontSize: isMobile ? 10 : 12 }}
-                      interval={timeConfig.tickCount}
+                      tickFormatter={formatXAxisTick}
+                      minTickGap={timeRange === '14d' ? 50 : 20}
+                      scale="point"
+                      padding={{ left: 20, right: 20 }}
                     />
-                    <YAxis
-                      domain={[0, 300]}
-                      tick={{ fontSize: isMobile ? 10 : 12 }}
-                      width={isMobile ? 40 : 60}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: theme.palette.background.paper,
-                        border: `1px solid ${theme.palette.divider}`,
-                        borderRadius: '8px',
-                        fontSize: isMobile ? '12px' : '14px',
+                    <YAxis 
+                      domain={getYDomain()}
+                      tick={{ 
+                        fontSize: isMobile ? 10 : 12,
+                        fill: theme.palette.text.primary,
                       }}
+                      ticks={timeRange === '24h' ? 
+                        [40, 80, 120, 160, 200, 240, 280, 300] : // Más marcas para 24h
+                        [40, 70, 100, 140, 180, 220, 260, 300]
+                      }
+                      width={45}
+                      axisLine={true}
+                      tickLine={true}
+                      padding={{ top: 20, bottom: 20 }}
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+                        fontSize: isMobile ? 12 : 14,
+                        padding: '8px'
+                      }}
+                      labelFormatter={(label) => `Hora: ${formatXAxisTick(label)}`}
                       formatter={(value: number) => [`${value} mg/dL`, 'Glucosa']}
-                      labelFormatter={(label) => format(new Date(label), 'dd/MM/yyyy HH:mm')}
                     />
                     <Line
                       type="monotone"
                       dataKey="value"
                       stroke={theme.palette.primary.main}
                       strokeWidth={2}
-                      dot={{ r: isMobile ? 2 : 4 }}
-                      activeDot={{ r: isMobile ? 4 : 6 }}
+                      dot={renderDot}
+                      activeDot={{ r: isMobile ? 4 : 5 }}
+                      className="opacity-80 hover:opacity-100 transition-opacity duration-300"
                     />
-                    {zoomDomain && (
-                      <ReferenceArea
-                        x1={zoomDomain.start}
-                        x2={zoomDomain.end}
-                        fill={alpha(theme.palette.primary.main, 0.1)}
-                        strokeOpacity={0}
-                      />
-                    )}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -1863,6 +1877,7 @@ const GlucoseMonitoring: React.FC = () => {
                 statistics={statistics}
                 rapidPenColor={rapidPenColor}
                 longPenColor={longPenColor}
+                insulinHistory={insulinLog}
               />
             </DialogContent>
           </>
@@ -1881,9 +1896,12 @@ interface StatDetailContentProps {
   statistics: any;
   rapidPenColor: string;
   longPenColor: string;
+  insulinHistory: { units: number; type: 'rapid' | 'long'; time: Date }[];
 }
 
-const StatDetailContent: React.FC<StatDetailContentProps> = ({ detailedStatKey, statConfig, statistics, rapidPenColor, longPenColor }) => {
+const StatDetailContent: React.FC<StatDetailContentProps> = ({ detailedStatKey, statConfig, statistics, rapidPenColor, longPenColor, insulinHistory }) => {
+  const [totalInsulinTimeRange, setTotalInsulinTimeRange] = useState('30d');
+
   const statConfigDetails = {
     average: {
       title: "Glucosa Promedio",
@@ -1901,65 +1919,93 @@ const StatDetailContent: React.FC<StatDetailContentProps> = ({ detailedStatKey, 
       title: "Desviación Estándar (DE)",
       description: "Mide qué tan dispersos están tus valores de glucosa respecto al promedio. Un valor más bajo significa niveles de glucosa más estables y predecibles. Un objetivo común es mantenerla por debajo de 50 mg/dL."
     },
-    cv: {
+     cv: {
       title: "Coeficiente de Variación (CV)",
       description: "Al igual que la DE, mide la variabilidad, pero en relación a la media. Esto permite comparar la variabilidad en diferentes promedios de glucosa. Un CV < 36% es el objetivo para un control glucémico estable y seguro."
     },
-    eA1c: {
+     eA1c: {
       title: "Hemoglobina Glicosilada Estimada (eA1c)",
       description: "Una estimación de tu A1c basada en tu glucosa promedio de los últimos 1-3 meses. Es una herramienta útil para el seguimiento, pero no reemplaza la prueba de A1c de laboratorio."
     },
-    totalInsulin: {
+     totalInsulin: {
       title: "Uso Total de Insulina",
-      description: "La cantidad total de unidades de insulina (rápida y prolongada) administradas en el período seleccionado. Ayuda a evaluar las necesidades de dosificación generales."
+      description: "La cantidad total de unidades de insulina (rápida y prolongada) administradas en el período. Ayuda a evaluar las necesidades de dosificación generales."
     }
   };
-
+  
   const timeInRangeData = [
     { name: 'En Rango', value: statistics.inRange, color: '#10b981' },
     { name: 'Alto', value: statistics.high, color: '#f43f5e' },
     { name: 'Bajo', value: statistics.low, color: '#f59e0b' },
   ];
+  
+  const totalInsulinData = useMemo(() => {
+    const now = new Date();
+    let startDate: Date;
 
-  const totalInsulinData = [
-    { name: 'Rápida', value: statistics.totalInsulin.rapid, color: rapidPenColor },
-    { name: 'Prolongada', value: statistics.totalInsulin.long, color: longPenColor },
-  ];
+    switch(totalInsulinTimeRange) {
+      case '7d': startDate = subDays(now, 7); break;
+      case '30d': startDate = subDays(now, 30); break;
+      case '90d': startDate = subDays(now, 90); break;
+      case '180d': startDate = subDays(now, 180); break;
+      case '1y': startDate = subYears(now, 1); break;
+      case '5y': startDate = subYears(now, 5); break;
+      case '10y': startDate = subYears(now, 10); break;
+      default: startDate = subDays(now, 30);
+    }
+
+    const filteredHistory = insulinHistory.filter(entry => isAfter(entry.time, startDate));
+
+    const totals = filteredHistory.reduce((acc: { rapid: number, long: number }, entry) => {
+      if(entry.type === 'rapid') {
+        acc.rapid += entry.units;
+      } else if (entry.type === 'long') {
+        acc.long += entry.units;
+      }
+      return acc;
+    }, { rapid: 0, long: 0 });
+
+    return [
+     { name: 'Rápida', value: totals.rapid, color: rapidPenColor },
+     { name: 'Prolongada', value: totals.long, color: longPenColor },
+    ];
+  }, [totalInsulinTimeRange, insulinHistory, rapidPenColor, longPenColor]);
+
 
   const getCVGauge = (cv: number) => {
-    const percentage = Math.min(cv / 50, 1) * 100;
+    const percentage = Math.min(cv / 50, 1) * 100; // Cap at 50% for visualization
     let color = '#10b981';
     if (cv >= 36 && cv < 45) color = '#f59e0b';
     if (cv >= 45) color = '#f43f5e';
-
+    
     return (
-      <Box sx={{ position: 'relative', width: '150px', height: '75px', overflow: 'hidden', mx: 'auto', mt: 2 }}>
-        <Box sx={{
-          position: 'absolute',
-          width: '150px',
-          height: '150px',
-          borderRadius: '50%',
-          border: '20px solid #e0e0e0',
-          borderBottomColor: 'transparent',
-          borderRightColor: 'transparent',
-          transform: 'rotate(-135deg)',
-        }} />
-        <Box sx={{
-          position: 'absolute',
-          width: '150px',
-          height: '150px',
-          borderRadius: '50%',
-          border: '20px solid transparent',
-          borderTopColor: color,
-          transform: `rotate(${-135 + (percentage * 1.8)}deg)`,
-          transition: 'transform 0.5s ease, border-color 0.5s ease'
-        }} />
-        <Typography variant="h4" sx={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', fontWeight: 700 }}>
-          {cv}%
-        </Typography>
-      </Box>
+       <Box sx={{ position: 'relative', width: '150px', height: '75px', overflow: 'hidden', mx: 'auto', mt: 2 }}>
+         <Box sx={{
+            position: 'absolute',
+            width: '150px',
+            height: '150px',
+            borderRadius: '50%',
+            border: '20px solid #e0e0e0',
+            borderBottomColor: 'transparent',
+            borderRightColor: 'transparent',
+            transform: 'rotate(-135deg)',
+          }} />
+          <Box sx={{
+            position: 'absolute',
+            width: '150px',
+            height: '150px',
+            borderRadius: '50%',
+            border: '20px solid transparent',
+            borderTopColor: color,
+            transform: `rotate(${-135 + (percentage * 1.8)}deg)`,
+            transition: 'transform 0.5s ease, border-color 0.5s ease'
+          }} />
+          <Typography variant="h4" sx={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)', fontWeight: 700 }}>
+            {cv}%
+          </Typography>
+       </Box>
     );
-  };
+  }
 
   return (
     <Stack spacing={2}>
@@ -1967,50 +2013,36 @@ const StatDetailContent: React.FC<StatDetailContentProps> = ({ detailedStatKey, 
         {statConfigDetails[detailedStatKey as keyof typeof statConfigDetails]?.description}
       </Typography>
       <Divider />
-
+      
       {detailedStatKey === 'inRange' && (
         <Stack spacing={2}>
-          <Box sx={{ height: { xs: 200, sm: 250 } }}>
+          <Box sx={{ height: { xs: 180, sm: 200 } }}>
             <ResponsiveContainer>
-              <PieChart>
-                <Pie
-                  data={timeInRangeData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  labelLine={false}
-                  label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
+               <PieChart>
+                 <Pie data={timeInRangeData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={5} labelLine={false}
+                   label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
                     const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-                    const x = cx + radius * Math.cos(-midAngle * (Math.PI / 180));
-                    const y = cy + radius * Math.sin(-midAngle * (Math.PI / 180));
+                    const x  = cx + radius * Math.cos(-midAngle * (Math.PI / 180));
+                    const y = cy  + radius * Math.sin(-midAngle * (Math.PI / 180));
                     return (
                       <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central">
                         {`${(percent * 100).toFixed(0)}%`}
                       </text>
                     );
-                  }}
-                >
-                  {timeInRangeData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+                  }}>
+                   {timeInRangeData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                 </Pie>
+                 <Legend />
+               </PieChart>
+             </ResponsiveContainer>
           </Box>
           <List dense>
             {timeInRangeData.map(item => (
-              <ListItem key={item.name} sx={{ py: 0 }}>
-                <ListItemIcon sx={{ minWidth: 30 }}>
-                  <Box sx={{ width: 12, height: 12, backgroundColor: item.color, borderRadius: '50%' }} />
-                </ListItemIcon>
-                <ListItemText primary={item.name} />
-                <Typography variant="body2">{item.value}%</Typography>
-              </ListItem>
+               <ListItem key={item.name} sx={{ py: 0 }}>
+                <ListItemIcon sx={{ minWidth: 30 }}><Box sx={{ width: 12, height: 12, backgroundColor: item.color, borderRadius: '50%' }} /></ListItemIcon>
+                 <ListItemText primary={item.name} />
+                 <Typography variant="body2">{item.value}%</Typography>
+               </ListItem>
             ))}
           </List>
         </Stack>
@@ -2018,69 +2050,64 @@ const StatDetailContent: React.FC<StatDetailContentProps> = ({ detailedStatKey, 
 
       {(detailedStatKey === 'cv' || detailedStatKey === 'stdDev') && (
         <Box sx={{ textAlign: 'center' }}>
-          {getCVGauge(statistics.cv)}
-          <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
-            Desviación Estándar: {statistics.stdDev} mg/dL
-          </Typography>
+           {getCVGauge(statistics.cv)}
+           <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+              Desviación Estándar: {statistics.stdDev} mg/dL
+           </Typography>
         </Box>
       )}
-
+      
       {detailedStatKey === 'eA1c' && (
-        <Typography variant="h4" sx={{ textAlign: 'center', fontWeight: 700, mt: 2 }}>
-          {statistics.eA1c}%
-          <Typography variant="caption" display="block" color="text.secondary">
-            (basado en un promedio de {statistics.average} mg/dL)
-          </Typography>
-        </Typography>
+         <Typography variant="h4" sx={{ textAlign: 'center', fontWeight: 700, mt: 2 }}>
+            {statistics.eA1c}%
+            <Typography variant="caption" display="block" color="text.secondary">
+              (basado en un promedio de {statistics.average} mg/dL)
+            </Typography>
+         </Typography>
       )}
 
-      {detailedStatKey === 'totalInsulin' && statistics.totalInsulin.total > 0 && (
+       {detailedStatKey === 'totalInsulin' && (
         <Stack spacing={2}>
-          <Box sx={{ height: { xs: 200, sm: 250 } }}>
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie
-                  data={totalInsulinData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                >
-                  {totalInsulinData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </Box>
-          <List dense>
-            <ListItem sx={{ py: 0 }}>
-              <ListItemIcon sx={{ minWidth: 30 }}>
-                <Box sx={{ width: 12, height: 12, backgroundColor: rapidPenColor, borderRadius: '50%' }} />
-              </ListItemIcon>
-              <ListItemText primary="Rápida" />
-              <Typography variant="body2">{statistics.totalInsulin.rapid} u</Typography>
-            </ListItem>
-            <ListItem sx={{ py: 0 }}>
-              <ListItemIcon sx={{ minWidth: 30 }}>
-                <Box sx={{ width: 12, height: 12, backgroundColor: longPenColor, borderRadius: '50%' }} />
-              </ListItemIcon>
-              <ListItemText primary="Prolongada" />
-              <Typography variant="body2">{statistics.totalInsulin.long} u</Typography>
-            </ListItem>
-            <Divider sx={{ my: 1 }} />
-            <ListItem sx={{ py: 0 }}>
-              <ListItemText primary="Total" primaryTypographyProps={{ fontWeight: 'bold' }} />
-              <Typography variant="body2" fontWeight="bold">
-                {statistics.totalInsulin.total} u
-              </Typography>
-            </ListItem>
-          </List>
+          <ButtonGroup size="small" fullWidth sx={{ pt: 1 }}>
+            <Button variant={totalInsulinTimeRange === '7d' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('7d')}>1S</Button>
+            <Button variant={totalInsulinTimeRange === '30d' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('30d')}>1M</Button>
+            <Button variant={totalInsulinTimeRange === '90d' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('90d')}>3M</Button>
+            <Button variant={totalInsulinTimeRange === '180d' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('180d')}>6M</Button>
+            <Button variant={totalInsulinTimeRange === '1y' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('1y')}>1A</Button>
+            <Button variant={totalInsulinTimeRange === '5y' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('5y')}>5A</Button>
+            <Button variant={totalInsulinTimeRange === '10y' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('10y')}>10A</Button>
+          </ButtonGroup>
+
+          {totalInsulinData.reduce((sum, d) => sum + d.value, 0) > 0 ? (
+            <>
+              <Box sx={{ height: { xs: 180, sm: 200 } }}>
+                <ResponsiveContainer>
+                   <PieChart>
+                     <Pie data={totalInsulinData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={5} label>
+                       {totalInsulinData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                     </Pie>
+                     <Legend />
+                   </PieChart>
+                 </ResponsiveContainer>
+              </Box>
+              <List dense>
+                  <ListItem sx={{ py: 0 }}>
+                    <ListItemIcon sx={{ minWidth: 30 }}><Box sx={{ width: 12, height: 12, backgroundColor: rapidPenColor, borderRadius: '50%' }} /></ListItemIcon>
+                    <ListItemText primary="Rápida" />
+                    <Typography variant="body2">{totalInsulinData.find(d => d.name === 'Rápida')?.value || 0} u</Typography>
+                  </ListItem>
+                  <ListItem sx={{ py: 0 }}>
+                     <ListItemIcon sx={{ minWidth: 30 }}><Box sx={{ width: 12, height: 12, backgroundColor: longPenColor, borderRadius: '50%' }} /></ListItemIcon>
+                     <ListItemText primary="Prolongada" />
+                     <Typography variant="body2">{totalInsulinData.find(d => d.name === 'Prolongada')?.value || 0} u</Typography>
+                  </ListItem>
+              </List>
+            </>
+          ) : (
+            <Typography sx={{ textAlign: 'center', py: 8, color: 'text.secondary' }}>
+              No hay datos de insulina para este período.
+            </Typography>
+          )}
         </Stack>
       )}
     </Stack>
