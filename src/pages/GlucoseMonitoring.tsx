@@ -1267,11 +1267,10 @@ const GlucoseMonitoring: React.FC = () => {
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              fontSize: insulinUnits === value ? '2rem' : '1.5rem',
-                              fontWeight: insulinUnits === value ? 700 : 400,
+                              scrollSnapAlign: 'center',
+                              fontSize: '1.5rem',
                               color: insulinUnits === value ? activeInsulinColor : 'text.secondary',
-                              transition: 'font-size 0.3s, font-weight 0.3s, transform 0.3s',
-                              transform: insulinUnits === value ? 'scale(1.15)' : 'scale(1)',
+                              transition: 'font-size 0.3s, color 0.3s',
                               cursor: 'pointer',
                             }}
                             onClick={() => setInsulinUnits(value)}
