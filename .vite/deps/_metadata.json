@@ -1,0 +1,133 @@
+{
+  "hash": "c1c13b8d",
+  "configHash": "f73c1c99",
+  "lockfileHash": "235527e1",
+  "browserHash": "fb3fe086",
+  "optimized": {
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "132a6316",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "aa2a7ff3",
+      "needsInterop": true
+    },
+    "react-router-dom": {
+      "src": "../../node_modules/react-router-dom/dist/index.js",
+      "file": "react-router-dom.js",
+      "fileHash": "03610955",
+      "needsInterop": false
+    },
+    "@mui/material/styles": {
+      "src": "../../node_modules/@mui/material/styles/index.js",
+      "file": "@mui_material_styles.js",
+      "fileHash": "15f27b29",
+      "needsInterop": false
+    },
+    "@mui/material/CssBaseline": {
+      "src": "../../node_modules/@mui/material/CssBaseline/index.js",
+      "file": "@mui_material_CssBaseline.js",
+      "fileHash": "4c3e5f44",
+      "needsInterop": false
+    },
+    "@mui/material/locale": {
+      "src": "../../node_modules/@mui/material/locale/index.js",
+      "file": "@mui_material_locale.js",
+      "fileHash": "c76d2ab0",
+      "needsInterop": false
+    },
+    "@mui/material": {
+      "src": "../../node_modules/@mui/material/index.js",
+      "file": "@mui_material.js",
+      "fileHash": "0ba2a18d",
+      "needsInterop": false
+    },
+    "@mui/icons-material/MonitorHeart": {
+      "src": "../../node_modules/@mui/icons-material/MonitorHeart.js",
+      "file": "@mui_icons-material_MonitorHeart.js",
+      "fileHash": "45c94936",
+      "needsInterop": true
+    },
+    "@mui/icons-material/Restaurant": {
+      "src": "../../node_modules/@mui/icons-material/Restaurant.js",
+      "file": "@mui_icons-material_Restaurant.js",
+      "fileHash": "88e5f93f",
+      "needsInterop": true
+    },
+    "@mui/icons-material/FitnessCenter": {
+      "src": "../../node_modules/@mui/icons-material/FitnessCenter.js",
+      "file": "@mui_icons-material_FitnessCenter.js",
+      "fileHash": "3a0b07d9",
+      "needsInterop": true
+    },
+    "@mui/icons-material/Medication": {
+      "src": "../../node_modules/@mui/icons-material/Medication.js",
+      "file": "@mui_icons-material_Medication.js",
+      "fileHash": "545c9e82",
+      "needsInterop": true
+    },
+    "@mui/icons-material": {
+      "src": "../../node_modules/@mui/icons-material/esm/index.js",
+      "file": "@mui_icons-material.js",
+      "fileHash": "6820447b",
+      "needsInterop": false
+    },
+    "recharts": {
+      "src": "../../node_modules/recharts/es6/index.js",
+      "file": "recharts.js",
+      "fileHash": "96a6a27c",
+      "needsInterop": false
+    },
+    "date-fns": {
+      "src": "../../node_modules/date-fns/index.mjs",
+      "file": "date-fns.js",
+      "fileHash": "f03f08db",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-WTUZLWYR": {
+      "file": "chunk-WTUZLWYR.js"
+    },
+    "chunk-UHINIFCJ": {
+      "file": "chunk-UHINIFCJ.js"
+    },
+    "chunk-CES2MLM3": {
+      "file": "chunk-CES2MLM3.js"
+    },
+    "chunk-CUREX44O": {
+      "file": "chunk-CUREX44O.js"
+    },
+    "chunk-5D3TK4BQ": {
+      "file": "chunk-5D3TK4BQ.js"
+    },
+    "chunk-MEYOS55Y": {
+      "file": "chunk-MEYOS55Y.js"
+    },
+    "chunk-526AJC6G": {
+      "file": "chunk-526AJC6G.js"
+    },
+    "chunk-WK2TOZO2": {
+      "file": "chunk-WK2TOZO2.js"
+    },
+    "chunk-DJVLAQEC": {
+      "file": "chunk-DJVLAQEC.js"
+    },
+    "chunk-F2VMVJ32": {
+      "file": "chunk-F2VMVJ32.js"
+    },
+    "chunk-HJJJZBZV": {
+      "file": "chunk-HJJJZBZV.js"
+    },
+    "chunk-W4EHDCLL": {
+      "file": "chunk-W4EHDCLL.js"
+    },
+    "chunk-EWTE5DHJ": {
+      "file": "chunk-EWTE5DHJ.js"
+    }
+  }
+}
