@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Card,
@@ -24,6 +24,23 @@ import {
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import TopNav from '../components/TopNav';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  rectSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToParentElement } from '@dnd-kit/modifiers';
 
 const CircularProgressWithLabel = (
   props: {
@@ -31,7 +48,7 @@ const CircularProgressWithLabel = (
     label: string;
     sublabel?: string;
     size?: number;
-    color?: string;
+    sx?: any;
   }
 ) => {
   return (
@@ -50,8 +67,7 @@ const CircularProgressWithLabel = (
         variant="determinate"
         size={props.size || 200}
         thickness={2}
-        sx={{ color: props.color || 'primary.main' }}
-        {...props}
+        sx={{ ...props.sx }}
       />
       <Box
         sx={{
@@ -79,9 +95,55 @@ const CircularProgressWithLabel = (
   );
 };
 
+const SortableItem = ({ id, children }: { id: string; children: React.ReactNode }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <Grid item xs={6} ref={setNodeRef} style={style}>
+      <div {...attributes} {...listeners}>
+        {children}
+      </div>
+    </Grid>
+  );
+};
+
 export default function Dashboard() {
   const currentTime = format(new Date(), 'h:mm a', { locale: es });
   const currentMeal = 'Antes de comer';
+
+  const [stats, setStats] = useState([
+    { id: 'activity', value: 28, label: '28', sublabel: 'min', color: '#2196f3', title: 'Actividad Física' },
+    { id: 'carbs', value: 78, label: '234', sublabel: 'carbs', color: '#ff9800', title: 'Carbohidratos' },
+  ]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (active.id !== over.id) {
+      setStats((items) => {
+        const oldIndex = items.findIndex((item) => item.id === active.id);
+        const newIndex = items.findIndex((item) => item.id === over.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
 
   return (
     <>
@@ -102,7 +164,7 @@ export default function Dashboard() {
                   value={70}
                   label="125"
                   sublabel="mg/dL"
-                  color="#4caf50"
+                  sx={{ color: '#4caf50' }}
                 />
               </CardContent>
             </Card>
@@ -110,43 +172,35 @@ export default function Dashboard() {
 
           {/* Widgets Secundarios */}
           <Grid item xs={12} md={6}>
-            <Grid container spacing={2}>
-              {/* Actividad Física */}
-              <Grid item xs={6}>
-                <Card>
-                  <CardContent sx={{ textAlign: 'center' }}>
-                    <CircularProgressWithLabel
-                      value={28}
-                      label="28"
-                      sublabel="min"
-                      size={120}
-                      color="#2196f3"
-                    />
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                      Actividad Física
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-
-              {/* Carbohidratos */}
-              <Grid item xs={6}>
-                <Card>
-                  <CardContent sx={{ textAlign: 'center' }}>
-                    <CircularProgressWithLabel
-                      value={78}
-                      label="234"
-                      sublabel="carbs"
-                      size={120}
-                      color="#ff9800"
-                    />
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                      Carbohidratos
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+              modifiers={[restrictToParentElement]}
+            >
+              <SortableContext items={stats.map(item => item.id)} strategy={rectSortingStrategy}>
+                <Grid container spacing={2}>
+                  {stats.map(stat => (
+                    <SortableItem key={stat.id} id={stat.id}>
+                      <Card>
+                        <CardContent sx={{ textAlign: 'center' }}>
+                          <CircularProgressWithLabel
+                            value={stat.value}
+                            label={stat.label}
+                            sublabel={stat.sublabel}
+                            size={120}
+                            sx={{ color: stat.color }}
+                          />
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                            {stat.title}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </SortableItem>
+                  ))}
+                </Grid>
+              </SortableContext>
+            </DndContext>
 
             {/* Lista de Acciones Rápidas */}
             <Card sx={{ mt: 2 }}>

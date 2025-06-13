@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -54,6 +54,8 @@ import {
   Opacity as OpacityIcon,
   TrackChanges as TrackChangesIcon,
   InfoOutlined as InfoOutlinedIcon,
+  DragHandle as DragHandleIcon,
+  DateRange as DateRangeIcon,
 } from '@mui/icons-material';
 import {
   LineChart,
@@ -75,6 +77,10 @@ import {
 import { format, subHours, isWithinInterval, subDays, subYears, isAfter } from 'date-fns';
 import type { Theme as MuiTheme } from '@mui/material/styles';
 import TildeIcon from '../components/icons/TildeIcon';
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, MouseSensor, TouchSensor } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy, horizontalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToParentElement, restrictToHorizontalAxis, restrictToFirstScrollableAncestor } from '@dnd-kit/modifiers';
 
 interface GlucoseDataPoint {
   time: string;
@@ -124,10 +130,13 @@ const timeRanges = [
 ] as const;
 
 const insulinTimeRanges = [
-  { value: '24h', label: '24 horas', hours: 24 },
-  { value: '7d', label: '7 días', hours: 168 },
-  { value: '14d', label: '14 días', hours: 336 },
-  { value: '30d', label: '1 mes', hours: 720 },
+  { value: '24h', label: 'Ultimas 24 Hrs', hours: 24 },
+  { value: '7d', label: 'Ultimos 7 Días', hours: 168 },
+  { value: '14d', label: 'Ultimos 14 Días', hours: 336 },
+  { value: '30d', label: 'Ultimo Mes', hours: 720 },
+  { value: '90d', label: 'Ultimos 3 Meses', hours: 2160 },
+  { value: '180d', label: 'Ultimos 6 Meses', hours: 4320 },
+  { value: '365d', label: 'Ultimo Año', hours: 8760 },
 ] as const;
 
 type InsulinTimeRange = typeof insulinTimeRanges[number]['value'];
@@ -286,8 +295,193 @@ type Theme = MuiTheme & {
   };
 };
 
+const generatePossibleReason = (type: 'high' | 'low' | 'peak' | 'valley', time: string, events?: TrendAnalysis['relatedEvents']): string => {
+  if (!events) return '';
+
+  const reasons: string[] = [];
+  
+  if (events.insulin?.rapid) {
+    reasons.push('considerar ajustar las dosis de insulina para las comidas');
+  }
+  
+  if (events.carbs) {
+    reasons.push('revisar los snacks entre comidas');
+  }
+  
+  return reasons.join(', ');
+};
+
+const allStatsConfig = {
+  average: { type: 'average', label: 'Promedio', unit: 'mg/dL', icon: <BarChartIcon /> },
+  inRange: { type: 'inRange', label: 'En Rango', unit: '%', icon: <TrackChangesIcon /> },
+  events: { type: 'events', label: 'Eventos', unit: '', icon: <WarningIcon /> },
+  stdDev: { type: 'stdDev', label: 'Desv. Est.', unit: 'mg/dL', icon: <ScienceIcon /> },
+  cv: { type: 'cv', label: 'CV', unit: '%', icon: <ScienceIcon /> },
+  eA1c: { type: 'eA1c', label: 'eA1c', unit: '%', icon: <OpacityIcon /> },
+  totalInsulin: { type: 'totalInsulin', label: 'Insulina Total', unit: 'u', icon: <WaveIcon /> },
+};
+
+interface SortableStatItemProps {
+  id: string;
+  config: {
+    label: string;
+    icon: React.ReactElement;
+  };
+  checked: boolean;
+  onToggle: () => void;
+  onShowDetails: () => void;
+}
+
+const SortableStatItem: React.FC<SortableStatItemProps> = React.memo(({ id, config, checked, onToggle, onShowDetails }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const theme = useTheme();
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 1 : 'auto',
+    position: 'relative' as 'relative',
+    backgroundColor: isDragging ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+  };
+
+  return (
+    <ListItem
+      ref={setNodeRef}
+      style={style}
+      secondaryAction={
+        <Stack direction="row" spacing={1} alignItems="center">
+          <IconButton edge="end" aria-label="details" onClick={onShowDetails}>
+            <InfoOutlinedIcon />
+          </IconButton>
+          <Switch
+            edge="end"
+            checked={checked}
+            onChange={onToggle}
+          />
+          <Box 
+            {...attributes} 
+            {...listeners} 
+            sx={{ 
+              cursor: 'grab',
+              display: 'flex',
+              alignItems: 'center',
+              p: 1,
+              borderRadius: 1,
+              '&:hover': {
+                backgroundColor: alpha(theme.palette.primary.main, 0.04),
+              },
+              '&:active': {
+                cursor: 'grabbing',
+                backgroundColor: alpha(theme.palette.primary.main, 0.08),
+              },
+              position: 'relative',
+            }}
+          >
+            <DragHandleIcon />
+            {isDragging && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  right: '120%',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  backgroundColor: theme.palette.primary.main,
+                  color: 'white',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  fontSize: '0.75rem',
+                  whiteSpace: 'nowrap',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  '&::after': {
+                    content: '""',
+                    position: 'absolute',
+                    right: '-6px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: 0,
+                    height: 0,
+                    borderTop: '6px solid transparent',
+                    borderBottom: '6px solid transparent',
+                    borderLeft: `6px solid ${theme.palette.primary.main}`,
+                  },
+                  animation: 'fadeIn 0.2s ease-out',
+                  '@keyframes fadeIn': {
+                    from: {
+                      opacity: 0,
+                      transform: 'translate(-10px, -50%)',
+                    },
+                    to: {
+                      opacity: 1,
+                      transform: 'translate(0, -50%)',
+                    },
+                  },
+                }}
+              >
+                <DragHandleIcon sx={{ fontSize: '0.875rem' }} />
+                <Typography sx={{ fontWeight: 500 }}>
+                  Arrastra para reordenar
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </Stack>
+      }
+    >
+      <ListItemIcon>{config.icon}</ListItemIcon>
+      <ListItemText primary={config.label} />
+    </ListItem>
+  );
+});
+
+interface SortableHorizontalStatCardProps {
+  id: string;
+  children: React.ReactNode;
+}
+
+const SortableHorizontalStatCard: React.FC<SortableHorizontalStatCardProps> = React.memo(({ id, children }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition: transition ? `${transition}, transform 0.3s ease` : 'transform 0.3s ease',
+    height: '100%',
+    position: 'relative' as 'relative',
+    zIndex: isDragging ? 1000 : 'auto',
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <div style={{ height: '100%', position: 'relative' }}>
+        {children}
+      </div>
+    </div>
+  );
+});
+
 const GlucoseMonitoring: React.FC = () => {
-  const theme = useTheme<Theme>();
+  const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
@@ -296,6 +490,10 @@ const GlucoseMonitoring: React.FC = () => {
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [isLoading, setIsLoading] = useState(false);
   const [timeRange, setTimeRange] = useState('12h');
+
+  // Generate a comprehensive 10-year history for detailed statistics
+  const glucoseHistory = useMemo(() => generateMockData(365 * 10 * 24), []);
+
   const [glucoseData, setGlucoseData] = useState<GlucoseDataPoint[]>(() => 
     generateMockData(timeRanges.find(r => r.value === '12h')?.hours || 12)
   );
@@ -329,29 +527,91 @@ const GlucoseMonitoring: React.FC = () => {
   const [isEditingQuickAdd, setIsEditingQuickAdd] = useState<boolean>(false);
 
   const rouletteRef = useRef<HTMLDivElement>(null);
-  const itemHeight = isDesktop ? 56 : 48; // Corresponde a height + gap
-  const [isScrolling, setIsScrolling] = useState(false);
   const scrollTimeoutRef = useRef<number | null>(null);
+  const isProgrammaticScroll = useRef(false);
+  const itemHeight = isDesktop ? 56 : 48; // Corresponde a height + gap
   
   // Estado para las estadísticas
   const [visibleStats, setVisibleStats] = useState(['average', 'inRange', 'events']);
   const [statsMenuOpen, setStatsMenuOpen] = useState(false);
   const [detailedStatKey, setDetailedStatKey] = useState<string | null>(null);
 
-  const rapidPenColor = selectedRapidPen === 'custom-rapid' 
-    ? customRapidColor 
-    : PEN_OPTIONS.find(p => p.id === selectedRapidPen)?.color || '#3b82f6';
+  const [statOrder, setStatOrder] = useState(Object.keys(allStatsConfig));
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 10,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 150,
+        tolerance: 10,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const autoScrollSensor = useSensor(PointerSensor, {
+    activationConstraint: {
+      delay: 300,
+      tolerance: 10,
+    },
+  });
+
+  const customSensors = useSensors(autoScrollSensor);
+
+  const handleStatDragEnd = useCallback((event: any) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setStatOrder((items) => {
+        const oldIndex = items.indexOf(active.id as string);
+        const newIndex = items.indexOf(over.id as string);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+    setActiveDragId(null);
+  }, []);
+
+  const handleUnitClick = useCallback((unit: number) => {
+    setInsulinUnits(unit);
     
-  const longPenColor = selectedLongPen === 'custom-long'
+    const roulette = rouletteRef.current;
+    if (roulette) {
+      // Marca que estamos haciendo un scroll programado
+      isProgrammaticScroll.current = true;
+      
+      roulette.scrollTo({
+        top: unit * itemHeight,
+        behavior: 'smooth'
+      });
+      
+      // Resetea el flag después de que la animación 'smooth' haya tenido tiempo de completarse.
+      // Esto previene que el listener de scroll se active por este desplazamiento.
+      setTimeout(() => {
+        isProgrammaticScroll.current = false;
+      }, 800); // Aumentado para dar tiempo a la animación
+    }
+  }, [itemHeight]);
+
+  const rapidPenColor = useMemo(() => selectedRapidPen === 'custom-rapid' 
+    ? customRapidColor 
+    : PEN_OPTIONS.find(p => p.id === selectedRapidPen)?.color || '#3b82f6', [selectedRapidPen, customRapidColor]);
+    
+  const longPenColor = useMemo(() => selectedLongPen === 'custom-long'
     ? customLongColor
-    : PEN_OPTIONS.find(p => p.id === selectedLongPen)?.color || '#8b5cf6';
+    : PEN_OPTIONS.find(p => p.id === selectedLongPen)?.color || '#8b5cf6', [selectedLongPen, customLongColor]);
   
-  const activeInsulinColor = insulinType === 'rapid' ? rapidPenColor : longPenColor;
+  const activeInsulinColor = useMemo(() => insulinType === 'rapid' ? rapidPenColor : longPenColor, [insulinType, rapidPenColor, longPenColor]);
 
   // Obtener la configuración actual del rango de tiempo
-  const currentTimeConfig = timeRanges.find(r => r.value === timeRange) || timeRanges[1];
+  const currentTimeConfig = useMemo(() => timeRanges.find(r => r.value === timeRange) || timeRanges[1], [timeRange]);
 
-  const handleTimeRangeChange = (event: SelectChangeEvent) => {
+  const handleTimeRangeChange = useCallback((event: SelectChangeEvent) => {
     const newRange = event.target.value;
     setTimeRange(newRange);
     const rangeConfig = timeRanges.find(r => r.value === newRange);
@@ -359,10 +619,10 @@ const GlucoseMonitoring: React.FC = () => {
       setGlucoseData(generateMockData(rangeConfig.hours));
       setZoomDomain(null); // Resetear zoom al cambiar el rango
     }
-  };
+  }, []);
 
   // Funciones para el control de zoom
-  const handleZoomIn = () => {
+  const handleZoomIn = useCallback(() => {
     if (!zoomDomain) {
       const length = glucoseData.length;
       setZoomDomain({
@@ -378,9 +638,9 @@ const GlucoseMonitoring: React.FC = () => {
         end: Math.min(glucoseData.length - 1, mid + Math.floor(newRange / 2))
       });
     }
-  };
+  }, [glucoseData.length, zoomDomain]);
 
-  const handleZoomOut = () => {
+  const handleZoomOut = useCallback(() => {
     if (zoomDomain) {
       const range = zoomDomain.end - zoomDomain.start;
       const mid = Math.floor((zoomDomain.start + zoomDomain.end) / 2);
@@ -394,21 +654,21 @@ const GlucoseMonitoring: React.FC = () => {
         setZoomDomain({ start: newStart, end: newEnd });
       }
     }
-  };
+  }, [glucoseData.length, zoomDomain]);
 
-  const handleResetZoom = () => {
+  const handleResetZoom = useCallback(() => {
     setZoomDomain(null);
-  };
+  }, []);
 
   // Calcular el dominio del eje Y basado en los datos visibles
-  const getYDomain = () => {
+  const getYDomain = useCallback(() => {
     if (zoomDomain) {
       return [Math.max(40, zoomDomain.start), Math.min(300, zoomDomain.end)];
     }
     return [40, 300]; // Rango más amplio por defecto
-  };
+  }, [zoomDomain]);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setIsLoading(true);
     // Simulate API call
     setTimeout(() => {
@@ -416,9 +676,9 @@ const GlucoseMonitoring: React.FC = () => {
       setLastUpdate(new Date());
       setIsLoading(false);
     }, 1000);
-  };
+  }, []);
 
-  const getTrendIcon = () => {
+  const getTrendIcon = useCallback(() => {
     switch (trend) {
       case 'up':
         return <TrendingUpIcon className="text-red-500" />;
@@ -427,16 +687,16 @@ const GlucoseMonitoring: React.FC = () => {
       default:
         return <TrendingFlatIcon className="text-green-500" />;
     }
-  };
+  }, [trend]);
 
-  const getGlucoseStatus = () => {
+  const getGlucoseStatus = useCallback(() => {
     if (currentGlucose > 180) return { color: 'error', text: 'Alto' };
     if (currentGlucose < 70) return { color: 'warning', text: 'Bajo' };
     return { color: 'success', text: 'En rango' };
-  };
+  }, [currentGlucose]);
 
   // Función para obtener la configuración de visualización según el rango de tiempo
-  const getTimeDisplayConfig = () => {
+  const timeConfig = useMemo(() => {
     const timeRangeHours = timeRanges.find(r => r.value === timeRange)?.hours || 12;
     
     // Ajustar el número de ticks según el rango de tiempo
@@ -469,41 +729,21 @@ const GlucoseMonitoring: React.FC = () => {
         }
       }
     };
-  };
+  }, [timeRange]);
 
   // Función para formatear las etiquetas de tiempo
-  const formatXAxisTick = (value: string) => {
+  const formatXAxisTick = useCallback((value: string) => {
     try {
       const date = new Date(value);
-      const config = getTimeDisplayConfig();
-      return config.formatTick(value);
+      return timeConfig.formatTick(value);
     } catch {
       return value;
     }
-  };
-
-  const timeConfig = getTimeDisplayConfig();
-
-  // Función para generar posibles razones de eventos
-  const generatePossibleReason = (type: 'high' | 'low' | 'peak' | 'valley', time: string, events?: TrendAnalysis['relatedEvents']): string => {
-    if (!events) return '';
-
-    const reasons: string[] = [];
-    
-    if (events.insulin?.rapid) {
-      reasons.push('considerar ajustar las dosis de insulina para las comidas');
-    }
-    
-    if (events.carbs) {
-      reasons.push('revisar los snacks entre comidas');
-    }
-    
-    return reasons.join(', ');
-  };
+  }, [timeConfig]);
 
   // Analizar los datos para detectar eventos importantes
   const analyzedData = useMemo(() => {
-    const data = generateMockData(timeRanges.find(r => r.value === timeRange)?.hours || 12);
+    const data = generateMockData(currentTimeConfig.hours);
     const analyzed: GlucoseDataPoint[] = data.map((point, index, arr) => {
       const value = point.value;
       const isHigh = value > 180;
@@ -525,7 +765,7 @@ const GlucoseMonitoring: React.FC = () => {
     });
 
     return analyzed;
-  }, [timeRange]);
+  }, [currentTimeConfig.hours]);
 
   // Extraer eventos significativos para el análisis
   const significantEvents = useMemo(() => {
@@ -566,7 +806,7 @@ const GlucoseMonitoring: React.FC = () => {
     return events;
   }, [analyzedData]);
 
-  const getTimeRangeAnalysis = (timeRangeHours: number, data: GlucoseDataPoint[]): string[] => {
+  const getTimeRangeAnalysis = useCallback((timeRangeHours: number, data: GlucoseDataPoint[]): string[] => {
     const analysis: string[] = [];
     
     if (data.length === 0) return analysis;
@@ -582,10 +822,10 @@ const GlucoseMonitoring: React.FC = () => {
     analysis.push(`Tiempo en rango: ${Math.round(inRangePercentage)}%`);
 
     return analysis;
-  };
+  }, []);
 
   // Fix the dot render function to always return an element
-  const renderDot = ({ cx, cy, payload }: DotProps): React.ReactElement<SVGElement> => {
+  const renderDot = useCallback(({ cx, cy, payload }: DotProps): React.ReactElement<SVGElement> => {
     if (!cx || !cy || !payload) {
       return (
         <circle
@@ -650,7 +890,7 @@ const GlucoseMonitoring: React.FC = () => {
         style={{ transition: 'fill 0.3s ease' }}
       />
     );
-  };
+  }, [theme.palette]);
 
   // Calculate statistics
   const statistics = useMemo(() => {
@@ -701,18 +941,8 @@ const GlucoseMonitoring: React.FC = () => {
     };
   }, [analyzedData, insulinLog]);
 
-  const allStatsConfig = {
-    average: { type: 'average', label: 'Promedio', unit: 'mg/dL', icon: <BarChartIcon /> },
-    inRange: { type: 'inRange', label: 'En Rango', unit: '%', icon: <TrackChangesIcon /> },
-    events: { type: 'events', label: 'Eventos', unit: '', icon: <WarningIcon /> },
-    stdDev: { type: 'stdDev', label: 'Desv. Est.', unit: 'mg/dL', icon: <ScienceIcon /> },
-    cv: { type: 'cv', label: 'CV', unit: '%', icon: <ScienceIcon /> },
-    eA1c: { type: 'eA1c', label: 'eA1c', unit: '%', icon: <OpacityIcon /> },
-    totalInsulin: { type: 'totalInsulin', label: 'Insulina Total', unit: 'u', icon: <WaveIcon /> },
-  };
-
   // Función para obtener los colores del gradiente con efecto 3D
-  const getGradientColors = (type: string, value: number) => {
+  const getGradientColors = useCallback((type: string, value: number) => {
     const baseColors = {
       success: ['rgba(52, 211, 153, 0.95)', 'rgba(16, 185, 129, 0.85)'], // Verde
       warning: ['rgba(251, 191, 36, 0.95)', 'rgba(245, 158, 11, 0.85)'], // Naranja
@@ -750,31 +980,34 @@ const GlucoseMonitoring: React.FC = () => {
       default:
         return baseColors.info;
     }
-  };
+  }, []);
 
-  const handleAddInsulin = () => {
+  const handleAddInsulin = useCallback(() => {
     const newEntry = { units: insulinUnits, type: insulinType, time: new Date() };
     setInsulinLog(prevLog => [...prevLog, newEntry].sort((a, b) => b.time.getTime() - a.time.getTime()));
     setInsulinUnits(1);
-  };
+  }, [insulinUnits, insulinType]);
 
-  const handleDeleteInsulinEntry = (entryToDelete: { units: number; type: 'rapid' | 'long'; time: Date } | null) => {
+  const handleDeleteInsulinEntry = useCallback((entryToDelete: { units: number; type: 'rapid' | 'long'; time: Date } | null) => {
     if (!entryToDelete) return;
     setInsulinLog(prevLog => prevLog.filter(entry => entry.time.getTime() !== entryToDelete.time.getTime()));
     setEntryToDelete(null); // Cerrar diálogo de confirmación
-  };
+  }, []);
 
-  const getInsulinTimeRangeLabel = (rangeValue: InsulinTimeRange) => {
+  const getInsulinTimeRangeLabel = useCallback((rangeValue: InsulinTimeRange) => {
     const range = insulinTimeRanges.find(r => r.value === rangeValue);
     if (!range) return "hoy";
     switch (range.value) {
       case '24h': return 'en las últimas 24 horas';
-      case '7d': return 'en la última semana';
-      case '14d': return 'en las últimas 2 semanas';
+      case '7d': return 'en los últimos 7 días';
+      case '14d': return 'en los últimos 14 días';
       case '30d': return 'en el último mes';
+      case '90d': return 'en los últimos 3 meses';
+      case '180d': return 'en los últimos 6 meses';
+      case '365d': return 'en el último año';
       default: return "hoy";
     }
-  };
+  }, []);
 
   const filteredInsulinLog = useMemo(() => {
     const now = new Date();
@@ -827,45 +1060,60 @@ const GlucoseMonitoring: React.FC = () => {
     return totals;
   }, [filteredInsulinLog, selectedRapidPen, selectedLongPen, customRapidCapacity, customLongCapacity]);
 
+  const handleOpenStatsMenu = useCallback(() => setStatsMenuOpen(true), []);
+  const handleCloseStatsMenu = useCallback(() => setStatsMenuOpen(false), []);
+  const handleOpenAnalysis = useCallback(() => setIsAnalysisOpen(true), []);
+  const handleCloseAnalysis = useCallback(() => setIsAnalysisOpen(false), []);
+  const handleCloseDetailedLog = useCallback(() => setDetailedLogType(null), []);
+  const handleCloseDeleteConfirmation = useCallback(() => setEntryToDelete(null), []);
+  const handleCloseDetailedStat = useCallback(() => setDetailedStatKey(null), []);
+
+  const visibleStatKeys = useMemo(() =>
+    statOrder.filter(key => visibleStats.includes(key)),
+    [statOrder, visibleStats]
+  );
+
+  useEffect(() => {
+    if (activeDragId) {
+      document.body.style.touchAction = 'none';
+    } else {
+      document.body.style.touchAction = 'auto';
+    }
+    return () => {
+      document.body.style.touchAction = 'auto';
+    };
+  }, [activeDragId]);
+
   useEffect(() => {
     const roulette = rouletteRef.current;
     if (!roulette) return;
 
-    const handleScrollEnd = () => {
+    const handleScroll = () => {
+      // No hacer nada si el scroll fue iniciado por un clic
+      if (isProgrammaticScroll.current) return;
+      
+      // Limpiar cualquier timeout anterior para "resetear" el debounce
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
-      scrollTimeoutRef.current = window.setTimeout(() => {
+      
+      // Establecer un nuevo timeout. El estado solo se actualizará cuando el usuario deje de hacer scroll.
+      scrollTimeoutRef.current = setTimeout(() => {
         const scrollTop = roulette.scrollTop;
+        // La clave es usar la posición de scroll para calcular el índice más cercano
         const selectedIndex = Math.round(scrollTop / itemHeight);
-        
-        // Evitar actualizaciones de estado innecesarias si el valor no cambia
-        if (selectedIndex !== insulinUnits) {
-          setInsulinUnits(selectedIndex);
-        }
-        setIsScrolling(false);
-      }, 150); // Un pequeño retraso para asegurar que el scroll haya terminado
+        setInsulinUnits(selectedIndex);
+      }, 300); // Tiempo de debounce aumentado para esperar al scroll-snap
     };
 
-    roulette.addEventListener('scroll', handleScrollEnd);
+    roulette.addEventListener('scroll', handleScroll);
     return () => {
-      roulette.removeEventListener('scroll', handleScrollEnd);
+      roulette.removeEventListener('scroll', handleScroll);
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
     };
-  }, [itemHeight, insulinUnits]);
-
-  useEffect(() => {
-    // Sincronizar el scroll con el estado cuando el estado cambia por un clic
-    const roulette = rouletteRef.current;
-    if (roulette && !isScrolling) {
-        const expectedScrollTop = insulinUnits * itemHeight;
-        if (Math.abs(roulette.scrollTop - expectedScrollTop) > 1) {
-             roulette.scrollTo({ top: expectedScrollTop, behavior: 'smooth' });
-        }
-    }
-  }, [insulinUnits, itemHeight, isScrolling]);
+  }, [itemHeight]);
 
   return (
     <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -949,6 +1197,7 @@ const GlucoseMonitoring: React.FC = () => {
           <Card
             className="bg-white rounded-xl shadow-lg"
             sx={{
+              overflow: 'visible',
               '& .MuiCardContent-root': {
                 height: '100%',
                 display: 'flex',
@@ -957,152 +1206,217 @@ const GlucoseMonitoring: React.FC = () => {
             }}
           >
             <CardContent className="p-4">
-              <Typography variant="h6" className="text-gray-700 mb-4">
-                Estadísticas
-              </Typography>
-              <Box
-                sx={{
-                  display: 'grid',
-                  gridAutoFlow: 'column',
-                  gridAutoColumns: { xs: '80%', sm: 'calc(50% - 0.5rem)', md: 'calc(33.33% - 0.66rem)' },
-                  gap: { xs: 2, sm: 3 },
-                  width: '100%',
-                  overflowX: 'auto',
-                  scrollSnapType: 'x mandatory',
-                  pb: 2, 
-                  '&::-webkit-scrollbar': {
-                    height: '8px',
-                  },
-                  '&::-webkit-scrollbar-thumb': {
-                    backgroundColor: 'rgba(0,0,0,0.2)',
-                    borderRadius: '4px',
-                  }
-                }}
-              >
-                {visibleStats.map(statKey => {
-                  const stat = allStatsConfig[statKey as keyof typeof allStatsConfig];
-                  const value = statKey === 'totalInsulin' 
-                    ? statistics.totalInsulin.total 
-                    : statistics[statKey as keyof Omit<typeof statistics, 'totalInsulin'>];
-                  const colors = getGradientColors(stat.type as string, value as number);
-                  
-                  if (!stat) return null;
-
-                  return (
-                    <Box
-                      key={stat.type}
-                      sx={{
-                        scrollSnapAlign: 'start',
-                        position: 'relative',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderRadius: '16px',
-                        background: `linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 100%)`,
-                        boxShadow: '0 4px 12px -2px rgba(0,0,0,0.15)',
-                        transition: 'transform 0.2s ease-out, box-shadow 0.2s ease-out',
-                        '&:hover': {
-                          transform: 'scale(1.03)',
-                          boxShadow: '0 8px 20px -4px rgba(0,0,0,0.2)',
-                        },
-                        aspectRatio: '1/1',
-                        p: 3,
-                      }}
-                    >
-                      <IconButton 
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="h6" className="text-gray-700">
+                  Estadísticas
+                </Typography>
+                <Box sx={{ transition: 'opacity 0.2s ease-in-out', opacity: activeDragId ? 1 : 0 }}>
+                    <Chip 
+                        icon={<DragHandleIcon fontSize="small" />} 
+                        label="Arrastrar" 
                         size="small"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDetailedStatKey(stat.type);
-                        }}
-                        sx={{
-                          position: 'absolute',
-                          top: 8,
-                          right: 8,
-                          color: 'rgba(255,255,255,0.8)',
-                          backgroundColor: 'rgba(0,0,0,0.1)',
-                          '&:hover': {
-                            backgroundColor: 'rgba(0,0,0,0.2)',
-                          }
-                        }}
-                      >
-                        <InfoOutlinedIcon fontSize="small" />
-                      </IconButton>
-                      <Typography
-                        variant="h6"
-                        sx={{
-                          color: 'white',
-                          fontWeight: 600,
-                          textAlign: 'center',
-                          textShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                          fontSize: { xs: '1rem', md: '1.125rem' },
-                          mb: 2,
-                        }}
-                      >
-                        {stat.label}
-                      </Typography>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'baseline',
-                          gap: '4px',
-                        }}
-                      >
-                        <Typography
-                          variant="h3"
-                          sx={{
-                            color: 'white',
-                            fontWeight: 700,
-                            textShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                            fontSize: { xs: '2.25rem', md: '2.75rem' },
-                          }}
-                        >
-                          {value}
-                        </Typography>
-                        {stat.unit && (
-                          <Typography
-                            variant="body1"
-                            sx={{
-                              color: 'rgba(255, 255, 255, 0.9)',
-                              fontWeight: 500,
-                              fontSize: { xs: '1rem', md: '1rem' },
-                            }}
-                          >
-                            {stat.unit}
-                          </Typography>
-                        )}
-                      </Box>
-                    </Box>
-                  );
-                })}
-                 <Box
-                  onClick={() => setStatsMenuOpen(true)}
-                  sx={{
-                    scrollSnapAlign: 'start',
-                    position: 'relative',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: '16px',
-                    border: `2px dashed ${theme.palette.grey[400]}`,
-                    transition: 'border-color 0.2s ease-out, background-color 0.2s ease-out',
-                    '&:hover': {
-                      backgroundColor: theme.palette.grey[100],
-                      borderColor: theme.palette.grey[500],
-                      cursor: 'pointer',
-                    },
-                    flexDirection: 'column',
-                    aspectRatio: '1/1',
-                    p: 3,
-                  }}
-                >
-                  <AddCircleOutlineIcon sx={{ fontSize: 40, color: 'grey.500', mb: 1 }} />
-                  <Typography variant="h6" sx={{ color: 'grey.600', fontWeight: 600 }}>
-                    Añadir/Editar
-                  </Typography>
+                        variant="outlined"
+                    />
                 </Box>
               </Box>
+              <DndContext 
+                sensors={sensors} 
+                collisionDetection={closestCenter} 
+                onDragStart={(e) => setActiveDragId(e.active.id as string)} 
+                onDragEnd={handleStatDragEnd} 
+                modifiers={[restrictToFirstScrollableAncestor, restrictToHorizontalAxis]}
+              >
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridAutoFlow: 'column',
+                    gridAutoColumns: { xs: '85%', sm: 'calc(50% - 0.5rem)', md: 'calc(33.33% - 0.66rem)' },
+                    gap: { xs: 2, sm: 3 },
+                    width: '100%',
+                    overflowX: 'auto',
+                    overflowY: 'visible',
+                    scrollSnapType: 'x mandatory',
+                    pt: 1,
+                    pb: { xs: 1, md: 3 }, // Added more padding-bottom for desktop to make space for the scrollbar
+                    px: 0.5,
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: `${theme.palette.grey[400]} ${theme.palette.grey[200]}`,
+                    '&::-webkit-scrollbar': {
+                      height: '10px',
+                    },
+                    '&::-webkit-scrollbar-track': {
+                      background: theme.palette.grey[100],
+                    },
+                    '&::-webkit-scrollbar-thumb': {
+                      backgroundColor: theme.palette.grey[300],
+                      borderRadius: '5px',
+                      border: `2px solid ${theme.palette.grey[100]}`,
+                      transition: 'background-color 0.3s ease',
+                    },
+                     '&::-webkit-scrollbar-thumb:hover': {
+                      backgroundColor: theme.palette.grey[500],
+                    }
+                  }}
+                >
+                  <SortableContext 
+                    items={visibleStatKeys}
+                    strategy={horizontalListSortingStrategy}
+                  >
+                    {visibleStatKeys.map(statKey => {
+                      const stat = allStatsConfig[statKey as keyof typeof allStatsConfig];
+                      const value = statKey === 'totalInsulin' 
+                        ? statistics.totalInsulin.total 
+                        : statistics[statKey as keyof Omit<typeof statistics, 'totalInsulin'>];
+                      const colors = getGradientColors(stat.type as string, value as number);
+                      const isActuallyDragging = activeDragId === stat.type;
+                      
+                      if (!stat) return null;
+
+                      return (
+                        <SortableHorizontalStatCard key={stat.type} id={stat.type}>
+                          <Box
+                            sx={{
+                              scrollSnapAlign: 'start',
+                              position: 'relative',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              borderRadius: '16px',
+                              background: `linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 100%)`,
+                              boxShadow: '0 4px 12px -2px rgba(0,0,0,0.15)',
+                              transition: 'all 0.2s ease-out',
+                              transform: 'translate3d(0, 0, 0)',
+                              backfaceVisibility: 'hidden',
+                              '&:hover': {
+                                transform: 'scale(1.03) translate3d(0, 0, 0)',
+                                boxShadow: '0 8px 20px -4px rgba(0,0,0,0.2)',
+                              },
+                              '@keyframes gentleShake': {
+                                '0%, 100%': { transform: 'translate3d(0, 0, 0) rotate(0deg)' },
+                                '25%': { transform: 'translate3d(-1px, 0, 0) rotate(-0.25deg)' },
+                                '75%': { transform: 'translate3d(1px, 0, 0) rotate(0.25deg)' },
+                              },
+                              '&:active': {
+                                cursor: 'grabbing',
+                              },
+                              ...(isActuallyDragging && {
+                                animation: 'gentleShake 0.2s ease-in-out infinite',
+                                transform: 'scale(1.05) translate3d(0, 0, 0)',
+                                boxShadow: '0 12px 24px -6px rgba(0,0,0,0.25)',
+                              }),
+                              aspectRatio: '1/1',
+                              p: { xs: 2, sm: 3 },
+                              cursor: 'grab',
+                              gap: { xs: 1, sm: 2 },
+                            }}
+                          >
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDetailedStatKey(stat.type);
+                              }}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              sx={{
+                                position: 'absolute',
+                                top: 4,
+                                right: 4,
+                                zIndex: 10,
+                                color: 'rgba(255,255,255,0.8)',
+                                '&:hover': {
+                                  backgroundColor: 'rgba(255,255,255,0.1)',
+                                  color: 'white',
+                                },
+                                '.MuiTouchRipple-child': {
+                                  backgroundColor: 'rgba(255, 255, 255, 0.3)',
+                                },
+                              }}
+                            >
+                              <InfoOutlinedIcon fontSize="small" />
+                            </IconButton>
+                            <Typography
+                              variant="h6"
+                              sx={{
+                                color: 'white',
+                                fontWeight: 600,
+                                textAlign: 'center',
+                                textShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                                fontSize: { xs: '1rem', md: '1.125rem' },
+                                mb: 0,
+                                minHeight: '2.8em',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                lineHeight: 1.4,
+                              }}
+                            >
+                              {stat.label}
+                            </Typography>
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                alignItems: 'baseline',
+                                gap: '4px',
+                              }}
+                            >
+                              <Typography
+                                variant="h3"
+                                sx={{
+                                  color: 'white',
+                                  fontWeight: 700,
+                                  textShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                                  fontSize: { xs: '2.25rem', md: '2.75rem' },
+                                }}
+                              >
+                                {value}
+                              </Typography>
+                              {stat.unit && (
+                                <Typography
+                                  variant="body1"
+                                  sx={{
+                                    color: 'rgba(255, 255, 255, 0.9)',
+                                    fontWeight: 500,
+                                    fontSize: { xs: '1rem', md: '1rem' },
+                                  }}
+                                >
+                                  {stat.unit}
+                                </Typography>
+                              )}
+                            </Box>
+                          </Box>
+                        </SortableHorizontalStatCard>
+                      );
+                    })}
+                  </SortableContext>
+                  <Box
+                    onClick={handleOpenStatsMenu}
+                    sx={{
+                      scrollSnapAlign: 'start',
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '16px',
+                      border: `2px dashed ${theme.palette.grey[400]}`,
+                      transition: 'border-color 0.2s ease-out, background-color 0.2s ease-out',
+                      '&:hover': {
+                        backgroundColor: theme.palette.grey[100],
+                        borderColor: theme.palette.grey[500],
+                        cursor: 'pointer',
+                      },
+                      flexDirection: 'column',
+                      aspectRatio: '1/1',
+                      p: 3,
+                    }}
+                  >
+                    <AddCircleOutlineIcon sx={{ fontSize: 40, color: 'grey.500', mb: 1 }} />
+                    <Typography variant="h6" sx={{ color: 'grey.600', fontWeight: 600 }}>
+                      Añadir/Editar
+                    </Typography>
+                  </Box>
+                </Box>
+              </DndContext>
             </CardContent>
           </Card>
         </div>
@@ -1241,7 +1555,6 @@ const GlucoseMonitoring: React.FC = () => {
                     
                     <Box
                       ref={rouletteRef}
-                      onScroll={() => setIsScrolling(true)}
                       sx={{
                         width: '100%',
                         height: '100%',
@@ -1269,11 +1582,11 @@ const GlucoseMonitoring: React.FC = () => {
                               justifyContent: 'center',
                               scrollSnapAlign: 'center',
                               fontSize: '1.5rem',
-                              color: insulinUnits === value ? activeInsulinColor : 'text.secondary',
+                              color: theme.palette.text.secondary, // Removed conditional color
                               transition: 'font-size 0.3s, color 0.3s',
                               cursor: 'pointer',
                             }}
-                            onClick={() => setInsulinUnits(value)}
+                            onClick={() => handleUnitClick(value)}
                           >
                             {value}
                           </Box>
@@ -1288,7 +1601,7 @@ const GlucoseMonitoring: React.FC = () => {
                         key={value}
                         variant="outlined"
                         size="small"
-                        onClick={() => setInsulinUnits(value)}
+                        onClick={() => handleUnitClick(value)}
                         sx={{
                           borderColor: activeInsulinColor,
                           color: activeInsulinColor,
@@ -1331,7 +1644,7 @@ const GlucoseMonitoring: React.FC = () => {
                         <Button
                           variant="outlined"
                           size="small"
-                          onClick={() => setInsulinUnits(customQuickAdd)}
+                          onClick={() => handleUnitClick(customQuickAdd)}
                           sx={{
                             borderColor: activeInsulinColor,
                             color: activeInsulinColor,
@@ -1349,6 +1662,26 @@ const GlucoseMonitoring: React.FC = () => {
                       </IconButton>
                     </div>
                   </div>
+                  <Button
+                    variant="contained"
+                    fullWidth
+                    onClick={handleAddInsulin}
+                    startIcon={<AddIcon />}
+                    sx={{
+                      borderRadius: '12px',
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      backgroundColor: insulinType === 'rapid' ? rapidPenColor : longPenColor,
+                      '&:hover': {
+                        backgroundColor: alpha(insulinType === 'rapid' ? rapidPenColor : longPenColor, 0.85)
+                      },
+                      mt: { xs: 2, md: 'auto' }, // Added specific margin-top for mobile
+                      pt: 1.5,
+                      pb: 1.5,
+                    }}
+                  >
+                    Registrar {insulinUnits}u {insulinType === 'rapid' ? 'Rápida' : 'Prolongada'}
+                  </Button>
                 </div>
                 
                 {/* Insulin Log Summary */}
@@ -1518,24 +1851,6 @@ const GlucoseMonitoring: React.FC = () => {
                      </Button>
                   </Box>
                   
-                  <Button
-                    variant="contained"
-                    fullWidth
-                    onClick={handleAddInsulin}
-                    startIcon={<AddIcon />}
-                    sx={{
-                      borderRadius: '12px',
-                      textTransform: 'none',
-                      fontWeight: 600,
-                      backgroundColor: insulinType === 'rapid' ? rapidPenColor : longPenColor,
-                      '&:hover': {
-                        backgroundColor: alpha(insulinType === 'rapid' ? rapidPenColor : longPenColor, 0.85)
-                      },
-                      mt: 'auto'
-                    }}
-                  >
-                    Registrar {insulinUnits}u {insulinType === 'rapid' ? 'Rápida' : 'Prolongada'}
-                  </Button>
                 </div>
               </div>
             </CardContent>
@@ -1554,7 +1869,7 @@ const GlucoseMonitoring: React.FC = () => {
                   <Button
                     variant="outlined"
                     size={isMobile ? "small" : "medium"}
-                    onClick={() => setIsAnalysisOpen(true)}
+                    onClick={handleOpenAnalysis}
                     startIcon={<InfoIcon />}
                   >
                     Ver Análisis
@@ -1730,7 +2045,7 @@ const GlucoseMonitoring: React.FC = () => {
       {/* Dialog de Análisis */}
       <Dialog
         open={isAnalysisOpen}
-        onClose={() => setIsAnalysisOpen(false)}
+        onClose={handleCloseAnalysis}
         maxWidth="sm"
         fullWidth
       >
@@ -1739,7 +2054,7 @@ const GlucoseMonitoring: React.FC = () => {
         </DialogTitle>
         <DialogContent>
           <List>
-            {getTimeRangeAnalysis(timeRanges.find(r => r.value === timeRange)?.hours || 12, analyzedData).map((analysis, index) => (
+            {getTimeRangeAnalysis(currentTimeConfig.hours, analyzedData).map((analysis, index) => (
               <ListItem key={`general-${index}`}>
                 <ListItemIcon>
                   <InfoIcon color="info" />
@@ -1765,14 +2080,14 @@ const GlucoseMonitoring: React.FC = () => {
           </List>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setIsAnalysisOpen(false)}>
+          <Button onClick={handleCloseAnalysis}>
             Cerrar
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Detailed Insulin Log Dialog */}
-      <Dialog open={detailedLogType !== null} onClose={() => setDetailedLogType(null)} fullWidth maxWidth="xs">
+      <Dialog open={detailedLogType !== null} onClose={handleCloseDetailedLog} fullWidth maxWidth="xs">
         <DialogTitle>
           Registro de Insulina {detailedLogType === 'rapid' ? 'Rápida' : 'Prolongada'}
         </DialogTitle>
@@ -1807,14 +2122,14 @@ const GlucoseMonitoring: React.FC = () => {
           </List>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDetailedLogType(null)}>Cerrar</Button>
+          <Button onClick={handleCloseDetailedLog}>Cerrar</Button>
         </DialogActions>
       </Dialog>
       
       {/* Confirm Deletion Dialog */}
       <Dialog
         open={entryToDelete !== null}
-        onClose={() => setEntryToDelete(null)}
+        onClose={handleCloseDeleteConfirmation}
       >
         <DialogTitle>Confirmar eliminación</DialogTitle>
         <DialogContent>
@@ -1823,7 +2138,7 @@ const GlucoseMonitoring: React.FC = () => {
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEntryToDelete(null)}>Cancelar</Button>
+          <Button onClick={handleCloseDeleteConfirmation}>Cancelar</Button>
           <Button onClick={() => handleDeleteInsulinEntry(entryToDelete)} color="error">
             Eliminar
           </Button>
@@ -1831,38 +2146,42 @@ const GlucoseMonitoring: React.FC = () => {
       </Dialog>
 
       {/* Stats Configuration Dialog */}
-      <Dialog open={statsMenuOpen} onClose={() => setStatsMenuOpen(false)} fullWidth maxWidth="xs">
+      <Dialog open={statsMenuOpen} onClose={handleCloseStatsMenu} fullWidth maxWidth="xs">
         <DialogTitle>Personalizar Estadísticas</DialogTitle>
-        <DialogContent>
-          <List>
-            {Object.entries(allStatsConfig).map(([key, config]) => (
-              <ListItem key={key}>
-                <ListItemIcon>{config.icon}</ListItemIcon>
-                <ListItemText primary={config.label} />
-                <ListItemSecondaryAction>
-                  <Switch
-                    edge="end"
+        <DialogContent sx={{ p: 0 }}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleStatDragEnd} modifiers={[restrictToParentElement]}>
+            <SortableContext items={statOrder} strategy={verticalListSortingStrategy}>
+              <List>
+                {statOrder.map(key => (
+                  <SortableStatItem
+                    key={key}
+                    id={key}
+                    config={allStatsConfig[key as keyof typeof allStatsConfig]}
                     checked={visibleStats.includes(key)}
-                    onChange={() => {
-                      setVisibleStats(prev => 
+                    onToggle={() => {
+                      setVisibleStats(prev =>
                         prev.includes(key)
                           ? prev.filter(s => s !== key)
                           : [...prev, key]
                       );
                     }}
+                    onShowDetails={() => {
+                      setDetailedStatKey(key);
+                      setStatsMenuOpen(false);
+                    }}
                   />
-                </ListItemSecondaryAction>
-              </ListItem>
-            ))}
-          </List>
+                ))}
+              </List>
+            </SortableContext>
+          </DndContext>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setStatsMenuOpen(false)}>Cerrar</Button>
+          <Button onClick={handleCloseStatsMenu}>Cerrar</Button>
         </DialogActions>
       </Dialog>
 
       {/* Detailed Stat Dialog */}
-      <Dialog open={detailedStatKey !== null} onClose={() => setDetailedStatKey(null)} fullWidth maxWidth="xs">
+      <Dialog open={detailedStatKey !== null} onClose={handleCloseDetailedStat} fullWidth maxWidth="xs">
         {detailedStatKey && (
           <>
             <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -1877,12 +2196,13 @@ const GlucoseMonitoring: React.FC = () => {
                 rapidPenColor={rapidPenColor}
                 longPenColor={longPenColor}
                 insulinHistory={insulinLog}
+                glucoseHistory={glucoseHistory}
               />
             </DialogContent>
           </>
         )}
         <DialogActions>
-          <Button onClick={() => setDetailedStatKey(null)}>Cerrar</Button>
+          <Button onClick={handleCloseDetailedStat}>Cerrar</Button>
         </DialogActions>
       </Dialog>
     </div>
@@ -1896,11 +2216,79 @@ interface StatDetailContentProps {
   rapidPenColor: string;
   longPenColor: string;
   insulinHistory: { units: number; type: 'rapid' | 'long'; time: Date }[];
+  glucoseHistory: GlucoseDataPoint[];
 }
 
-const StatDetailContent: React.FC<StatDetailContentProps> = ({ detailedStatKey, statConfig, statistics, rapidPenColor, longPenColor, insulinHistory }) => {
-  const [totalInsulinTimeRange, setTotalInsulinTimeRange] = useState('30d');
+const statTimeRanges = [
+  { value: '7d', label: 'Últimos 7 Días' },
+  { value: '14d', label: 'Últimos 14 Días' },
+  { value: '30d', label: 'Último Mes' },
+  { value: '90d', label: 'Últimos 3 Meses' },
+  { value: '180d', label: 'Últimos 6 Meses' },
+  { value: '365d', label: 'Último Año' },
+  { value: '3650d', label: 'Últimos 10 Años' },
+];
 
+const StatDetailContent: React.FC<StatDetailContentProps> = ({ detailedStatKey, statConfig, statistics, rapidPenColor, longPenColor, insulinHistory, glucoseHistory }) => {
+  const [statTimeRange, setStatTimeRange] = useState('30d');
+  const [isTimeRangePickerOpen, setIsTimeRangePickerOpen] = useState(false);
+  const theme = useTheme();
+
+  const filteredData = useMemo(() => {
+    const now = new Date();
+    const days = parseInt(statTimeRange.replace('d', ''), 10);
+    const startDate = subDays(now, days);
+    
+    const filteredGlucose = glucoseHistory.filter(entry => isAfter(new Date(entry.time), startDate));
+    const filteredInsulin = insulinHistory.filter(entry => isAfter(entry.time, startDate));
+
+    return { filteredGlucose, filteredInsulin };
+  }, [statTimeRange, glucoseHistory, insulinHistory]);
+
+  const detailedStatistics = useMemo(() => {
+    const values = filteredData.filteredGlucose.map(d => d.value).filter(v => v > 0);
+    if (values.length === 0) {
+      return { average: 0, inRange: 0, high: 0, low: 0, events: 0, stdDev: 0, cv: 0, eA1c: 0, totalInsulin: { total: 0, rapid: 0, long: 0 } };
+    }
+
+    const sum = values.reduce((a, b) => a + b, 0);
+    const avgValue = Math.round(sum / values.length);
+    const highCount = values.filter(v => v > 180).length;
+    const lowCount = values.filter(v => v < 70).length;
+    const inRangeCount = values.length - highCount - lowCount;
+    
+    const inRangePercentage = Math.round((inRangeCount / values.length) * 100);
+    const highPercentage = Math.round((highCount / values.length) * 100);
+    const lowPercentage = Math.round((lowCount / values.length) * 100);
+    const eventCount = highCount + lowCount;
+
+    const mean = sum / values.length;
+    const stdDev = Math.round(Math.sqrt(values.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b, 0) / values.length));
+
+    const cv = mean > 0 ? Math.round((stdDev / mean) * 100) : 0;
+    
+    const eA1c = mean > 0 ? parseFloat(((avgValue + 46.7) / 28.7).toFixed(1)) : 0;
+
+    const totalInsulinRapid = filteredData.filteredInsulin.filter(e => e.type === 'rapid').reduce((acc, entry) => acc + entry.units, 0);
+    const totalInsulinLong = filteredData.filteredInsulin.filter(e => e.type === 'long').reduce((acc, entry) => acc + entry.units, 0);
+
+    return {
+      average: avgValue,
+      inRange: inRangePercentage,
+      high: highPercentage,
+      low: lowPercentage,
+      events: eventCount,
+      stdDev,
+      cv,
+      eA1c,
+      totalInsulin: {
+        total: totalInsulinRapid + totalInsulinLong,
+        rapid: totalInsulinRapid,
+        long: totalInsulinLong
+      }
+    };
+  }, [filteredData]);
+  
   const statConfigDetails = {
     average: {
       title: "Glucosa Promedio",
@@ -1933,42 +2321,17 @@ const StatDetailContent: React.FC<StatDetailContentProps> = ({ detailedStatKey, 
   };
   
   const timeInRangeData = [
-    { name: 'En Rango', value: statistics.inRange, color: '#10b981' },
-    { name: 'Alto', value: statistics.high, color: '#f43f5e' },
-    { name: 'Bajo', value: statistics.low, color: '#f59e0b' },
+    { name: 'En Rango', value: detailedStatistics.inRange, color: '#10b981' },
+    { name: 'Alto', value: detailedStatistics.high, color: '#f43f5e' },
+    { name: 'Bajo', value: detailedStatistics.low, color: '#f59e0b' },
   ];
   
   const totalInsulinData = useMemo(() => {
-    const now = new Date();
-    let startDate: Date;
-
-    switch(totalInsulinTimeRange) {
-      case '7d': startDate = subDays(now, 7); break;
-      case '30d': startDate = subDays(now, 30); break;
-      case '90d': startDate = subDays(now, 90); break;
-      case '180d': startDate = subDays(now, 180); break;
-      case '1y': startDate = subYears(now, 1); break;
-      case '5y': startDate = subYears(now, 5); break;
-      case '10y': startDate = subYears(now, 10); break;
-      default: startDate = subDays(now, 30);
-    }
-
-    const filteredHistory = insulinHistory.filter(entry => isAfter(entry.time, startDate));
-
-    const totals = filteredHistory.reduce((acc: { rapid: number, long: number }, entry) => {
-      if(entry.type === 'rapid') {
-        acc.rapid += entry.units;
-      } else if (entry.type === 'long') {
-        acc.long += entry.units;
-      }
-      return acc;
-    }, { rapid: 0, long: 0 });
-
     return [
-     { name: 'Rápida', value: totals.rapid, color: rapidPenColor },
-     { name: 'Prolongada', value: totals.long, color: longPenColor },
+     { name: 'Rápida', value: detailedStatistics.totalInsulin.rapid, color: rapidPenColor },
+     { name: 'Prolongada', value: detailedStatistics.totalInsulin.long, color: longPenColor },
     ];
-  }, [totalInsulinTimeRange, insulinHistory, rapidPenColor, longPenColor]);
+  }, [detailedStatistics.totalInsulin, rapidPenColor, longPenColor]);
 
 
   const getCVGauge = (cv: number) => {
@@ -2006,101 +2369,161 @@ const StatDetailContent: React.FC<StatDetailContentProps> = ({ detailedStatKey, 
     );
   }
 
+  const RADIAN = Math.PI / 180;
+  const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name, value }) => {
+    const radius = innerRadius + (outerRadius - innerRadius) * 1.4;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+    return (
+      <text x={x} y={y} fill="black" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize={14}>
+        {`${name}: ${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
   return (
     <Stack spacing={2}>
       <Typography variant="body1" sx={{ color: 'text.secondary' }}>
         {statConfigDetails[detailedStatKey as keyof typeof statConfigDetails]?.description}
       </Typography>
+      
+      <Button
+        variant="outlined"
+        fullWidth
+        onClick={() => setIsTimeRangePickerOpen(true)}
+        endIcon={<DateRangeIcon />}
+        sx={{ mt: 1 }}
+      >
+        {statTimeRanges.find(r => r.value === statTimeRange)?.label}
+      </Button>
+
+      <Dialog open={isTimeRangePickerOpen} onClose={() => setIsTimeRangePickerOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Seleccionar Periodo</DialogTitle>
+        <DialogContent sx={{ p: { xs: 1, sm: 2 } }}>
+           <Box
+            sx={{
+              display: 'flex',
+              overflowX: 'auto',
+              scrollSnapType: 'x mandatory',
+              gap: 2,
+              py: 2,
+              px: 1,
+              '&::-webkit-scrollbar': { height: '8px' },
+              '&::-webkit-scrollbar-track': { background: theme.palette.grey[200] },
+              '&::-webkit-scrollbar-thumb': { backgroundColor: theme.palette.grey[400], borderRadius: '4px' },
+            }}
+          >
+            {statTimeRanges.map(range => (
+              <Card
+                key={range.value}
+                onClick={() => {
+                  setStatTimeRange(range.value);
+                  setIsTimeRangePickerOpen(false);
+                }}
+                elevation={statTimeRange === range.value ? 8 : 2}
+                sx={{
+                  scrollSnapAlign: 'center',
+                  minWidth: '160px',
+                  cursor: 'pointer',
+                  border: `2px solid ${statTimeRange === range.value ? theme.palette.primary.main : 'transparent'}`,
+                  transform: statTimeRange === range.value ? 'scale(1.03)' : 'scale(1)',
+                  transition: 'transform 0.2s, border-color 0.2s, box-shadow 0.2s',
+                  '&:hover': {
+                    transform: 'scale(1.02)',
+                    borderColor: theme.palette.primary.light,
+                  }
+                }}
+              >
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h6" component="div">
+                    {range.label.split(' ')[0]}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {range.label.split(' ').slice(1).join(' ')}
+                  </Typography>
+                </CardContent>
+              </Card>
+            ))}
+          </Box>
+        </DialogContent>
+      </Dialog>
+      
       <Divider />
       
       {detailedStatKey === 'inRange' && (
         <Stack spacing={2}>
-          <Box sx={{ height: { xs: 180, sm: 200 } }}>
+          <Box sx={{ height: { xs: 220, sm: 250 } }}>
             <ResponsiveContainer>
-               <PieChart>
-                 <Pie data={timeInRangeData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={5} labelLine={false}
-                   label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }) => {
-                    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-                    const x  = cx + radius * Math.cos(-midAngle * (Math.PI / 180));
-                    const y = cy  + radius * Math.sin(-midAngle * (Math.PI / 180));
-                    return (
-                      <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central">
-                        {`${(percent * 100).toFixed(0)}%`}
-                      </text>
-                    );
-                  }}>
+               <PieChart margin={{ top: 30, right: 30, bottom: 30, left: 30 }}>
+                 <Pie 
+                   data={timeInRangeData} 
+                   dataKey="value" 
+                   nameKey="name" 
+                   cx="50%" 
+                   cy="50%" 
+                   innerRadius={60} 
+                   outerRadius={80} 
+                   paddingAngle={5} 
+                   labelLine={true}
+                   label={renderCustomizedLabel}
+                   isAnimationActive={true}
+                  >
                    {timeInRangeData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                  </Pie>
-                 <Legend />
+                 <Legend verticalAlign="bottom" height={36}/>
+                 <Tooltip/>
                </PieChart>
              </ResponsiveContainer>
           </Box>
-          <List dense>
-            {timeInRangeData.map(item => (
-               <ListItem key={item.name} sx={{ py: 0 }}>
-                <ListItemIcon sx={{ minWidth: 30 }}><Box sx={{ width: 12, height: 12, backgroundColor: item.color, borderRadius: '50%' }} /></ListItemIcon>
-                 <ListItemText primary={item.name} />
-                 <Typography variant="body2">{item.value}%</Typography>
-               </ListItem>
-            ))}
-          </List>
         </Stack>
       )}
 
       {(detailedStatKey === 'cv' || detailedStatKey === 'stdDev') && (
         <Box sx={{ textAlign: 'center' }}>
-           {getCVGauge(statistics.cv)}
+           {getCVGauge(detailedStatistics.cv)}
            <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
-              Desviación Estándar: {statistics.stdDev} mg/dL
+              Desviación Estándar: {detailedStatistics.stdDev} mg/dL
            </Typography>
         </Box>
       )}
       
       {detailedStatKey === 'eA1c' && (
          <Typography variant="h4" sx={{ textAlign: 'center', fontWeight: 700, mt: 2 }}>
-            {statistics.eA1c}%
+            {detailedStatistics.eA1c}%
             <Typography variant="caption" display="block" color="text.secondary">
-              (basado en un promedio de {statistics.average} mg/dL)
+              (basado en un promedio de {detailedStatistics.average} mg/dL)
             </Typography>
          </Typography>
       )}
 
        {detailedStatKey === 'totalInsulin' && (
         <Stack spacing={2}>
-          <ButtonGroup size="small" fullWidth sx={{ pt: 1 }}>
-            <Button variant={totalInsulinTimeRange === '7d' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('7d')}>1S</Button>
-            <Button variant={totalInsulinTimeRange === '30d' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('30d')}>1M</Button>
-            <Button variant={totalInsulinTimeRange === '90d' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('90d')}>3M</Button>
-            <Button variant={totalInsulinTimeRange === '180d' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('180d')}>6M</Button>
-            <Button variant={totalInsulinTimeRange === '1y' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('1y')}>1A</Button>
-            <Button variant={totalInsulinTimeRange === '5y' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('5y')}>5A</Button>
-            <Button variant={totalInsulinTimeRange === '10y' ? 'contained' : 'outlined'} onClick={() => setTotalInsulinTimeRange('10y')}>10A</Button>
-          </ButtonGroup>
-
           {totalInsulinData.reduce((sum, d) => sum + d.value, 0) > 0 ? (
             <>
-              <Box sx={{ height: { xs: 180, sm: 200 } }}>
+              <Box sx={{ height: { xs: 220, sm: 250 } }}>
                 <ResponsiveContainer>
-                   <PieChart>
-                     <Pie data={totalInsulinData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={5} label>
+                   <PieChart margin={{ top: 30, right: 30, bottom: 30, left: 30 }}>
+                     <Pie 
+                       data={totalInsulinData} 
+                       dataKey="value" 
+                       nameKey="name" 
+                       cx="50%" 
+                       cy="50%" 
+                       innerRadius={60} 
+                       outerRadius={80} 
+                       paddingAngle={5} 
+                       labelLine={true}
+                       label={renderCustomizedLabel}
+                       isAnimationActive={true}
+                      >
                        {totalInsulinData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                      </Pie>
-                     <Legend />
+                     <Legend verticalAlign="bottom" height={36}/>
+                     <Tooltip/>
                    </PieChart>
                  </ResponsiveContainer>
               </Box>
-              <List dense>
-                  <ListItem sx={{ py: 0 }}>
-                    <ListItemIcon sx={{ minWidth: 30 }}><Box sx={{ width: 12, height: 12, backgroundColor: rapidPenColor, borderRadius: '50%' }} /></ListItemIcon>
-                    <ListItemText primary="Rápida" />
-                    <Typography variant="body2">{totalInsulinData.find(d => d.name === 'Rápida')?.value || 0} u</Typography>
-                  </ListItem>
-                  <ListItem sx={{ py: 0 }}>
-                     <ListItemIcon sx={{ minWidth: 30 }}><Box sx={{ width: 12, height: 12, backgroundColor: longPenColor, borderRadius: '50%' }} /></ListItemIcon>
-                     <ListItemText primary="Prolongada" />
-                     <Typography variant="body2">{totalInsulinData.find(d => d.name === 'Prolongada')?.value || 0} u</Typography>
-                  </ListItem>
-              </List>
             </>
           ) : (
             <Typography sx={{ textAlign: 'center', py: 8, color: 'text.secondary' }}>
